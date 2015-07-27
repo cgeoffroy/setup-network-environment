@@ -20,28 +20,41 @@ import (
 var (
 	defaultEnvironmentFilePath = "/etc/network-environment"
 	environmentFilePath        string
+        filterCidrStr              string
 )
 
 func init() {
 	log.SetFlags(0)
 	flag.StringVar(&environmentFilePath, "o", defaultEnvironmentFilePath, "environment file")
+        flag.StringVar(&filterCidrStr, "f", "", "a optional CIDR to filter addresses")
 }
 
 func main() {
+        var filterCidrNet *net.IPNet
+
 	flag.Parse()
+
+        if filterCidrStr != "" {
+                var err error
+                _, filterCidrNet, err = net.ParseCIDR(filterCidrStr)
+                if err != nil {
+		        log.Fatal("Cannot parse CIDR", filterCidrStr)
+                }
+        }
+
 	tempFilePath := environmentFilePath + ".tmp"
 	tempFile, err := os.Create(tempFilePath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer tempFile.Close()
-	if err := writeEnvironment(tempFile); err != nil {
+	if err := writeEnvironment(tempFile, filterCidrNet); err != nil {
 		log.Fatal(err)
 	}
 	os.Rename(tempFilePath, environmentFilePath)
 }
 
-func writeEnvironment(w io.Writer) error {
+func writeEnvironment(w io.Writer, filterCidrNet *net.IPNet) error {
 	var buffer bytes.Buffer
 	defaultIfaceName, err := getDefaultGatewayIfaceName()
 	if err != nil {
@@ -62,6 +75,10 @@ func writeEnvironment(w io.Writer) error {
 			// Record IPv4 network settings. Stop at the first IPv4 address
 			// found for the interface.
 			if err == nil && ip.To4() != nil {
+                                if filterCidrNet != nil && filterCidrNet.Contains(ip) {
+                                        continue
+                                }
+
 				buffer.WriteString(fmt.Sprintf("%s_IPV4=%s\n", strings.Replace(strings.ToUpper(iface.Name), ".", "_", -1), ip.String()))
 				if defaultIfaceName == iface.Name {
 					buffer.WriteString(fmt.Sprintf("DEFAULT_IPV4=%s\n", ip.String()))
